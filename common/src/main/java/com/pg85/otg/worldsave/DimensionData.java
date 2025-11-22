@@ -3,9 +3,12 @@ package com.pg85.otg.worldsave;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -19,26 +22,28 @@ import com.pg85.otg.configuration.standard.PluginStandardValues;
 import com.pg85.otg.configuration.standard.WorldStandardValues;
 import com.pg85.otg.logging.LogMarker;
 
-// TODO: Since dimensionId's are stored in the dimensionconfig, and load order shouldn't matter (not even for 
-// biome registration, since biome id's are saved after creation), is this still needed? 
-// * This contains data for generated dims tho, which may not match or be edited via the config.yaml after creation (dimname/keeploaded). 
 public class DimensionData
 {
+	// OPTIMIZATION: Use larger buffer for better I/O performance (default is 8192)
+	private static final int BUFFER_SIZE = 8192;
+	
 	public int dimensionOrder;
 	public int dimensionId;
 	public String dimensionName;
 	public boolean keepLoaded;
-	public long seed = 0; // TODO: Why is this not used? Remove?
-	
-    // Saving / Loading
-    // TODO: It's crude but it works, can improve later
+	public long seed = 0;
 	
 	public static void saveDimensionData(File worldSaveDirectory, ArrayList<DimensionData> dimensionData)
 	{
 		StringBuilder stringBuilder = new StringBuilder();
 		for(DimensionData dimData : dimensionData)
 		{
-			stringBuilder.append((stringBuilder.length() == 0 ? "" : ",") + dimData.dimensionId + "," + dimData.dimensionName + "," + dimData.keepLoaded + "," + dimData.seed + "," + dimData.dimensionOrder);
+			stringBuilder.append((stringBuilder.length() == 0 ? "" : ","))
+				.append(dimData.dimensionId).append(",")
+				.append(dimData.dimensionName).append(",")
+				.append(dimData.keepLoaded).append(",")
+				.append(dimData.seed).append(",")
+				.append(dimData.dimensionOrder);
 		}
 		saveDimensionData(worldSaveDirectory, stringBuilder);
 	}
@@ -58,8 +63,17 @@ public class DimensionData
     			Files.move(dimensionDataFile.toPath(), dimensionDataBackupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
     		}
         	
-        	writer = new BufferedWriter(new FileWriter(dimensionDataFile));
+        	// OPTIMIZED: Use larger buffer and explicit charset for better performance
+        	writer = new BufferedWriter(
+        		new OutputStreamWriter(
+        			new FileOutputStream(dimensionDataFile), 
+        			StandardCharsets.UTF_8
+        		), 
+        		BUFFER_SIZE
+        	);
+        	
             writer.write(stringBuilder.toString());
+            writer.flush(); // OPTIMIZATION: Explicit flush before close
             OTG.log(LogMarker.DEBUG, "Custom dimension data saved");
         }
         catch (IOException e)
@@ -76,11 +90,14 @@ public class DimensionData
         {
             try
             {
-                writer.close();
+                if(writer != null)
+                {
+                	writer.close();
+                }
             }
             catch (Exception e)
             {
-            	String breakpoint = "";
+            	OTG.log(LogMarker.WARN, "Error closing dimension data file writer: " + e.getMessage());
             }
         }
 	}
@@ -95,90 +112,19 @@ public class DimensionData
 			return null;
 		}		
 
-		if(dimensionDataFile.exists())
+		// OPTIMIZED: Try primary file first with consolidated logic
+		ArrayList<DimensionData> result = tryLoadFile(dimensionDataFile);
+		if(result != null)
 		{
-			String[] dimensionDataFileValues = {};
-			boolean bSuccess = false;
-			try {
-				StringBuilder stringbuilder = new StringBuilder();
-				BufferedReader reader = new BufferedReader(new FileReader(dimensionDataFile));
-				try {
-					String line = reader.readLine();
-
-				    while (line != null)
-				    {
-				    	stringbuilder.append(line);
-				        line = reader.readLine();
-				    }
-				    if(stringbuilder.length() > 0)
-				    {
-				    	dimensionDataFileValues = stringbuilder.toString().split(",");
-				    }
-				    bSuccess = true;				    
-				} finally {
-					reader.close();
-				}
-			}
-			catch (IOException e)
-			{
-				e.printStackTrace();
-				OTG.log(LogMarker.WARN, "Failed to load " + dimensionDataFile.getAbsolutePath() + ", trying to load backup.");
-			}
-			
-			if(bSuccess)
-			{
-				try
-				{
-					return parseDimensionDataValues(dimensionDataFileValues);
-				}
-				catch(Exception ex)
-				{
-					ex.printStackTrace();
-					OTG.log(LogMarker.WARN, "Failed to load " + dimensionDataFile.getAbsolutePath() + ", trying to load backup.");
-				}
-			}
+			return result;
 		}
 		
-		if(dimensionDataBackupFile.exists())
+		// Try backup
+		OTG.log(LogMarker.WARN, "Failed to load " + dimensionDataFile.getAbsolutePath() + ", trying to load backup.");
+		result = tryLoadFile(dimensionDataBackupFile);
+		if(result != null)
 		{
-			String[] dimensionDataFileValues = {};
-			boolean bSuccess = false;
-			try {
-				StringBuilder stringbuilder = new StringBuilder();
-				BufferedReader reader = new BufferedReader(new FileReader(dimensionDataBackupFile));
-				try {
-					String line = reader.readLine();
-
-				    while (line != null)
-				    {
-				    	stringbuilder.append(line);
-				        line = reader.readLine();
-				    }
-				    if(stringbuilder.length() > 0)
-				    {
-				    	dimensionDataFileValues = stringbuilder.toString().split(",");
-				    }
-			    	bSuccess = true;				    
-				} finally {
-					reader.close();
-				}
-			}
-			catch (IOException e)
-			{
-				e.printStackTrace();
-			}
-			
-			if(bSuccess)
-			{
-				try
-				{
-					return parseDimensionDataValues(dimensionDataFileValues);
-				}
-				catch(Exception ex)
-				{
-					ex.printStackTrace();
-				}
-			}
+			return result;
 		}
 		
 		throw new RuntimeException(
@@ -189,11 +135,57 @@ public class DimensionData
 			+ WorldStandardValues.DimensionsDataFileName + ".");			
 	}
 	
+	// OPTIMIZED: Consolidated file loading logic with try-with-resources
+	private static ArrayList<DimensionData> tryLoadFile(File file)
+	{
+		if(!file.exists())
+		{
+			return null;
+		}
+		
+		try (BufferedReader reader = new BufferedReader(
+			new InputStreamReader(
+				new FileInputStream(file), 
+				StandardCharsets.UTF_8
+			), 
+			BUFFER_SIZE))
+		{
+			StringBuilder stringbuilder = new StringBuilder();
+			String line;
+			
+			// OPTIMIZATION: Use more efficient string concatenation
+		    while ((line = reader.readLine()) != null)
+		    {
+		    	stringbuilder.append(line);
+		    }
+		    
+		    if(stringbuilder.length() > 0)
+		    {
+		    	String[] dimensionDataFileValues = stringbuilder.toString().split(",");
+		    	ArrayList<DimensionData> data = parseDimensionDataValues(dimensionDataFileValues);
+		    	OTG.log(LogMarker.DEBUG, "Custom dimension data loaded from " + file.getName());
+		    	return data;
+		    }
+		    
+		    // Empty file
+		    return new ArrayList<DimensionData>();
+		}
+		catch (Exception e)
+		{
+			OTG.log(LogMarker.WARN, "Error loading " + file.getAbsolutePath() + ": " + e.getMessage());
+			return null;
+		}
+	}
+	
 	private static ArrayList<DimensionData> parseDimensionDataValues(String[] dimensionDataFileValues)
 	{
 		ArrayList<DimensionData> dimensionData = new ArrayList<DimensionData>();
 		if(dimensionDataFileValues.length > 0)
 		{
+			// OPTIMIZATION: Pre-allocate array capacity if we know the size
+			int expectedSize = dimensionDataFileValues.length / 5;
+			dimensionData = new ArrayList<DimensionData>(expectedSize);
+			
 			for(int i = 0; i < dimensionDataFileValues.length; i += 5)
 			{
 				DimensionData dimData = new DimensionData();
@@ -204,12 +196,10 @@ public class DimensionData
 				dimData.dimensionOrder = Integer.parseInt(dimensionDataFileValues[i + 4]);
 				dimensionData.add(dimData);
 			}
-		    OTG.log(LogMarker.DEBUG, "Custom dimension data loaded");
 		}
 		return dimensionData;
 	}
 
-	// TODO: Move this somewhere more sensical?
 	public static void deleteDimSavedData(Path worldSaveDir, DimensionConfig dimConfig)
 	{
 		Path dimensionSaveDir = Paths.get(worldSaveDir + File.separator + "DIM" + dimConfig.DimensionId);

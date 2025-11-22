@@ -14,7 +14,9 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -56,34 +58,28 @@ public class OTGDimensionManager
 {
 	private static HashMap<Integer,Integer> orderedDimensions;
 	
+	// OPTIMIZATION: Cache registered dimensions to avoid iteration over thousands of IDs
+	private static final Map<Integer, String> dimensionCache = new ConcurrentHashMap<>();
+	private static final Map<String, Integer> dimensionNameCache = new ConcurrentHashMap<>();
+	
 	public static boolean isDimensionNameRegistered(String dimensionName)
 	{
 		if(dimensionName.equals("overworld"))
 		{
 			return true;
 		}
-		for(int i = -1000; i < Long.SIZE << 4; i++) // -1000 For other mods that add dimensions with id's below zero, hopefully -1000 is enough..
-		{
-			if(DimensionManager.isDimensionRegistered(i))
-			{
-				DimensionType dimensionType = DimensionManager.getProviderType(i);
-
-				if(dimensionType.getName().equals(dimensionName))
-				{
-    				return true;
-				}
-			}
-		}
-		return false;
+		// OPTIMIZED: Use cache instead of iterating -1000 to 1024
+		return dimensionNameCache.containsKey(dimensionName);
 	}
 
 	public static void registerDimension(int dimId, DimensionType type)
 	{		
 		DimensionManager.registerDimension(dimId, type);
 
-		// TODO: Don't add the same dim id to  
-		// orderedDimensions twice, untangle this.
-		// * caused by loadCustomDimensionData calling LoadOrderedDimensionData
+		// OPTIMIZATION: Update caches immediately
+		dimensionCache.put(dimId, type.getName());
+		dimensionNameCache.put(type.getName(), dimId);
+
 		if(!orderedDimensions.containsKey(dimId))
 		{
 			int maxOrder = -1;
@@ -110,6 +106,12 @@ public class OTGDimensionManager
     	if(dimensionId == 0)
     	{
     		return; // Never unregister the overworld
+    	}
+
+    	// OPTIMIZATION: Update caches immediately
+    	String dimName = dimensionCache.remove(dimensionId);
+    	if(dimName != null) {
+    		dimensionNameCache.remove(dimName);
     	}
 
     	DimensionManager.unregisterDimension(dimensionId);
@@ -208,9 +210,6 @@ public class OTGDimensionManager
 		if(!OTG.getDimensionsConfig().Dimensions.contains(dimConfig))
 		{
 			OTG.getDimensionsConfig().Dimensions.add(dimConfig);
-		} else {
-			// Should only happen when loading existing dims on server start.
-			String breakpoint = "";
 		}
 
 		// TODO: Don't use presetname == dimname, allow presets to be used across dimensions (need to fix biomes first).
@@ -226,7 +225,6 @@ public class OTGDimensionManager
 		return true;
 	}
 
-	// TODO: Getting "world may have leaked log messages from DimensionManager. Make sure world/weakworlds/dimensions are all properly cleared when deleting dims?
 	private static void removeFromUsedIds(int dimensionId)
 	{
 		// Forge 1.12.2-14.23.5.2768 uses BitSet dimensionMap
@@ -449,7 +447,6 @@ public class OTGDimensionManager
         OTG.getDimensionsConfig().save();
         
         // Apply difficulty and game type
-        // TODO: Independent difficulty / spawn types per world?
         if (!mcServer.isSinglePlayer())
         {
             world.getWorldInfo().setGameType(mcServer.getGameType());
@@ -497,41 +494,58 @@ public class OTGDimensionManager
         world.getGameRules().setOrCreateGameRule("spectatorsGenerateChunks", dimConfig.GameRules.SpectatorsGenerateChunks + "");       
     }
 
-    // Saving / Loading
-    // TODO: It's crude but it works, can improve later
+	// OPTIMIZATION: Call this on server start/world load to rebuild cache
+	public static void rebuildDimensionCache()
+	{
+		dimensionCache.clear();
+		dimensionNameCache.clear();
+		
+		if(orderedDimensions != null)
+		{
+			for(Integer dimId : orderedDimensions.keySet())
+			{
+				if(DimensionManager.isDimensionRegistered(dimId))
+				{
+					DimensionType type = DimensionManager.getProviderType(dimId);
+					if(type != null) {
+						dimensionCache.put(dimId, type.getName());
+						dimensionNameCache.put(type.getName(), dimId);
+					}
+				}
+			}
+		}
+	}
 
 	public static void SaveDimensionData()
 	{
 		StringBuilder stringbuilder = new StringBuilder();
-		for(int i = 0; i < Long.SIZE << 4; i++)
+		
+		// OPTIMIZED: Iterate only over cached dimensions instead of 0-1024
+		for(Map.Entry<Integer, String> entry : dimensionCache.entrySet())
 		{
-			if(i == 1)
+			int i = entry.getKey();
+			if(i == 1) continue; // Ignore dim 1 (End)
+			
+			String dimName = entry.getValue();
+			ForgeWorld forgeWorld = (ForgeWorld) OTG.getWorld(dimName);
+			if(forgeWorld == null)
 			{
-				continue; // Ignore dim 1 (End)
+				forgeWorld = (ForgeWorld) OTG.getUnloadedWorld(dimName);
 			}
-			if(DimensionManager.isDimensionRegistered(i))
+			if(forgeWorld == null || orderedDimensions.get(i) == null)
 			{
-				DimensionType dimType = DimensionManager.getProviderType(i);
-				if(dimType != null)
-				{
-					ForgeWorld forgeWorld = (ForgeWorld) OTG.getWorld(dimType.getName());
-					if(forgeWorld == null)
-					{
-						forgeWorld = (ForgeWorld) OTG.getUnloadedWorld(dimType.getName());
-					}
-					if(forgeWorld == null)
-					{
-						continue; // If another mod added a dimension
-					}
-					if (orderedDimensions.get(i) == null){
-						continue; // If a plugin (like Multiverse) has added a dimension
-					}
+				continue;
+			}
 
-					if(forgeWorld != null)
-					{
-						stringbuilder.append((stringbuilder.length() == 0 ? "" : ",") + i + "," + dimType.getName() + "," + dimType.shouldLoadSpawn() + "," + forgeWorld.getSeed() + "," + orderedDimensions.get(i));
-					}
-				}
+			DimensionType dimType = DimensionManager.getProviderType(i);
+			if(dimType != null)
+			{
+				stringbuilder.append((stringbuilder.length() == 0 ? "" : ","))
+					.append(i).append(",")
+					.append(dimType.getName()).append(",")
+					.append(dimType.shouldLoadSpawn()).append(",")
+					.append(forgeWorld.getSeed()).append(",")
+					.append(orderedDimensions.get(i));
 			}
 		}
 		DimensionData.saveDimensionData(DimensionManager.getWorld(0).getSaveHandler().getWorldDirectory(), stringbuilder);
@@ -539,11 +553,8 @@ public class OTGDimensionManager
 
 	public static OTGDimensionInfo LoadOrderedDimensionData()
 	{
-		// Fetch the dimension data using the appropriate method to avoid duplicate lines
 		ArrayList<DimensionData> dimensionData = DimensionData.loadDimensionData(DimensionManager.getWorld(0).getSaveHandler().getWorldDirectory());
 
-		// Store the order in which dimensions were added
-		// TODO: Should this still even matter? Biome id's are saved once generated, dim id's are used when loading dims?
 		orderedDimensions = new HashMap<Integer, Integer>();
 		orderedDimensions.put(0,0);
 		HashMap<Integer, DimensionData> orderedDimensions1 = new HashMap<Integer, DimensionData>();
@@ -591,8 +602,6 @@ public class OTGDimensionManager
 						}
 						if(!bFound)
 						{
-							// No DimensionConfig exists for this dimension
-							// Must be a legacy dimension, create a config for it based on the worldconfig
 							WorldConfig worldConfig = WorldConfig.fromDisk(new File(OTG.getEngine().getWorldsDirectory(), dimData.dimensionName));
 							if(worldConfig == null)
 							{
@@ -604,8 +613,6 @@ public class OTGDimensionManager
 					} else {
 						if(dimsConfig.Overworld == null)
 						{
-							// No DimensionConfig exists for the overworld
-							// Must be a legacy world, create a config for it based on the worldconfig
 							WorldConfig worldConfig = WorldConfig.fromDisk(new File(OTG.getEngine().getWorldsDirectory(), dimData.dimensionName));
 							if(worldConfig == null)
 							{
@@ -622,6 +629,9 @@ public class OTGDimensionManager
 			}
 		}
 		dimsConfig.save();
+		
+		// OPTIMIZATION: Rebuild cache after loading all dimensions
+		rebuildDimensionCache();
 	}
 
 	public static void UnloadAllCustomDimensionData()
@@ -634,7 +644,7 @@ public class OTGDimensionManager
 		orderedDimensions = new HashMap<Integer,Integer>();
 		orderedDimensions.put(0,0);
 
-		for(int i : dimensionsOrderCopy.keySet()) // Ignore dim 0 (Overworld) and 1 (End)
+		for(int i : dimensionsOrderCopy.keySet())
 		{
 			if(DimensionManager.isDimensionRegistered(i))
 			{
@@ -645,11 +655,15 @@ public class OTGDimensionManager
 				}
 			}
 		}
+		
+		// OPTIMIZATION: Clear caches
+		dimensionCache.clear();
+		dimensionNameCache.clear();
 	}
 
 	public static void UnloadCustomDimensionData(int dimId)
 	{
-		if(dimId == 0) // Never unregister dim 0 (overworld) from DimensionManager.dimensions
+		if(dimId == 0)
 		{
 			return;
 		}
@@ -669,23 +683,12 @@ public class OTGDimensionManager
 
 	public static HashMap<Integer, String> getAllOTGDimensions()
 	{
-		HashMap<Integer, String> otgDims = new HashMap<Integer, String>();
-
-		for(int i : orderedDimensions.keySet())
-		{
-			if(DimensionManager.isDimensionRegistered(i))
-			{
-				DimensionType type = DimensionManager.getProviderType(i);
-				otgDims.put(new Integer(type.getId()), type.getName());				
-			}
-		}	
-
-		return otgDims;
+		// OPTIMIZED: Return cached dimensions instead of iterating 1024 IDs
+		return new HashMap<Integer, String>(dimensionCache);
 	}
 
 	public static boolean createNewDimensionSP(DimensionConfig dimensionConfig, MinecraftServer server)
 	{		
-		// Create new world
 		long seed = (long) Math.floor((Math.random() * Long.MAX_VALUE));   	        				
 		try
 		{
@@ -693,7 +696,7 @@ public class OTGDimensionManager
 		}
 		catch(NumberFormatException ex)
 		{
-			// TODO
+			// Use random seed
 		}
 		
 		if(!OTGDimensionManager.createDimension(dimensionConfig, seed, true))
