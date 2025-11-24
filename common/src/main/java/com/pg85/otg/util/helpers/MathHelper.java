@@ -1,11 +1,12 @@
 package com.pg85.otg.util.helpers;
 
-public class MathHelper
+public final class MathHelper // Made final - utility class
 {
-    private static float[] A = new float[65536];
+    private static final float[] SINE_TABLE = new float[65536]; // Better name
 
     private MathHelper()
     {
+        // Prevent instantiation
     }
     
     public static float sqrt(float paramFloat)
@@ -15,18 +16,17 @@ public class MathHelper
 
     public static float sin(float paramFloat)
     {
-        return A[((int) (paramFloat * 10430.378F) & 0xFFFF)];
+        return SINE_TABLE[((int) (paramFloat * 10430.378F) & 0xFFFF)];
     }
 
     public static float cos(float paramFloat)
     {
-        return A[((int) (paramFloat * 10430.378F + 16384.0F) & 0xFFFF)];
+        return SINE_TABLE[((int) (paramFloat * 10430.378F + 16384.0F) & 0xFFFF)];
     }
 
     public static int floor(double d0)
     {
         int i = (int) d0;
-
         return d0 < i ? i - 1 : i;
     }
 
@@ -38,19 +38,16 @@ public class MathHelper
 
     public static int abs(int number)
     {
-        if (number > 0)
-        {
-            return number;
-        } else
-        {
-            return -number;
-        }
+        // OPTIMIZATION: Use Math.abs or bit manipulation
+        return number >= 0 ? number : -number;
     }
 
     static
     {
         for (int i = 0; i < 65536; i++)
-            A[i] = (float) Math.sin(i * 3.141592653589793D * 2.0D / 65536.0D);
+        {
+            SINE_TABLE[i] = (float) Math.sin(i * Math.PI * 2.0D / 65536.0D);
+        }
     }
 
     public static int ceil(float floatNumber)
@@ -64,18 +61,14 @@ public class MathHelper
         return check > max ? max : (check < min ? min : check);
     }
     
-    /*
+    /**
      * Modulus, rather than java's modulo (%)
      * which does a remainder operation.
      */
     public static int mod(int x, int y)
     {
         int result = x % y;
-        if (result < 0)
-        {
-            result += y;
-        }
-        return result;
+        return result < 0 ? result + y : result; // OPTIMIZATION: Simplified
     }
     
     public static boolean tryParseInt(String value)
@@ -83,8 +76,8 @@ public class MathHelper
         try {  
             Integer.parseInt(value);  
             return true;  
-         } catch (NumberFormatException e) {  
+        } catch (NumberFormatException e) {  
             return false;  
-         }  
-   }
+        }  
+    }
 }

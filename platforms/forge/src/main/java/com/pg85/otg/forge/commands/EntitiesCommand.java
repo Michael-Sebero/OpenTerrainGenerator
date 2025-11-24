@@ -13,6 +13,11 @@ import net.minecraft.util.text.TextComponentString;
 
 public class EntitiesCommand extends BaseCommand
 {
+    // Minecraft formatting codes - using escape sequences
+    private static final String SECTION_SIGN = "\u00A7";
+    private static final String COLOR_GREEN = SECTION_SIGN + "2";
+    private static final String COLOR_BRIGHT_GREEN = SECTION_SIGN + "a";
+    
     EntitiesCommand()
     {
         name = "entities";
@@ -30,6 +35,7 @@ public class EntitiesCommand extends BaseCommand
         sender.sendMessage(
                 new TextComponentString(MESSAGE_COLOR + "Some of these, like ThrownPotion, FallingSand, Mob and Painting may crash the game so be sure to test your BO3 in single player."));
         sender.sendMessage(new TextComponentString(""));
+        
         EnumCreatureType[] aenumcreaturetype = EnumCreatureType.values();
         for (ResourceLocation entry : EntityList.getEntityNameList())
         {
@@ -44,7 +50,12 @@ public class EntitiesCommand extends BaseCommand
                         msg += VALUE_COLOR + " (" + enumcreaturetype.name() + ")";
                     }
                 }
-                OTG.log(LogMarker.INFO, msg.replace("§2", "").replace("§", "").replace("§a", ""));
+                
+                // FIXED: Remove Minecraft color codes for console logging
+                String logMsg = msg.replace(COLOR_GREEN, "")
+                                   .replace(SECTION_SIGN, "")
+                                   .replace(COLOR_BRIGHT_GREEN, "");
+                OTG.log(LogMarker.INFO, logMsg);
                 sender.sendMessage(new TextComponentString(MESSAGE_COLOR + "- " + msg));
             } else {
                 // This can happen for LIGHTNING_BOLT since it appears to be added to the

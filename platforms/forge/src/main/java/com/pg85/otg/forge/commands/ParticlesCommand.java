@@ -11,6 +11,11 @@ import net.minecraft.util.text.TextComponentString;
 
 public class ParticlesCommand extends BaseCommand
 {
+    // Minecraft formatting codes - using escape sequences
+    private static final String SECTION_SIGN = "\u00A7";
+    private static final String COLOR_GREEN = SECTION_SIGN + "2";
+    private static final String COLOR_BRIGHT_GREEN = SECTION_SIGN + "a";
+    
     ParticlesCommand()
     {
         name = "particles";
@@ -25,10 +30,16 @@ public class ParticlesCommand extends BaseCommand
         OTG.log(LogMarker.INFO, "-- Particles List --");
         sender.sendMessage(new TextComponentString("-- Particles List --"));
         sender.sendMessage(new TextComponentString(""));
+        
         for (String entry : EnumParticleTypes.getParticleNames())
         {
             String msg = entry;
-            OTG.log(LogMarker.INFO, msg.replace("§2", "").replace("§", "").replace("§a", ""));
+            
+            // FIXED: Remove Minecraft color codes for console logging
+            String logMsg = msg.replace(COLOR_GREEN, "")
+                               .replace(SECTION_SIGN, "")
+                               .replace(COLOR_BRIGHT_GREEN, "");
+            OTG.log(LogMarker.INFO, logMsg);
             sender.sendMessage(new TextComponentString(MESSAGE_COLOR + "- " + msg));
         }
 

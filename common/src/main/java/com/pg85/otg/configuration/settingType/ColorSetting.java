@@ -9,11 +9,10 @@ import com.pg85.otg.exception.InvalidConfigException;
  * <p>Color reading allows multiple formats. Colors starting with 0x or
  * # are interpreted as hexadecimal numbers, colors starting with 0 as octal
  * numbers and other colors as decimal numbers. Colors are case insensitive.
- *
  */
 class ColorSetting extends Setting<Integer>
 {
-    private int defaultValue;
+    private final int defaultValue; // Made final
 
     ColorSetting(String name, String defaultValue)
     {
@@ -32,12 +31,12 @@ class ColorSetting extends Setting<Integer>
     {
         try
         {
-            Integer integer = Integer.decode(string);
-            if (integer.intValue() > 0xffffff || integer.intValue() < 0)
+            int value = Integer.decode(string); // Use primitive to avoid boxing
+            if (value > 0xffffff || value < 0)
             {
                 throw new InvalidConfigException("Color must have 6 hexadecimal digits");
             }
-            return integer;
+            return value;
         } catch (NumberFormatException e)
         {
             throw new InvalidConfigException("Invalid color " + string);
@@ -47,7 +46,8 @@ class ColorSetting extends Setting<Integer>
     @Override
     public String write(Integer value)
     {
-        return "#" + Integer.toHexString(value.intValue() | 0x1000000).substring(1).toUpperCase();
+        // FIX: Original had potential issue with negative values
+        // Ensure we're working with the lower 24 bits only
+        return String.format("#%06X", value & 0xFFFFFF);
     }
-
 }

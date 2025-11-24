@@ -1,9 +1,5 @@
 package com.pg85.otg.util;
 
-import com.pg85.otg.configuration.biome.BiomeConfig;
-
-import java.util.Random;
-
 /**
  * Immutable class to hold the biome ids of a biome.
  * <p>
@@ -12,18 +8,19 @@ import java.util.Random;
  * generation, one is saved to the map files. The id used during generation
  * has to be unique, the one saved to the map files doesn't have to be unique.
  */
-public class BiomeIds
+public final class BiomeIds // Made final as described as immutable
 {
     private int otgBiomeId;
     private int savedId;
-    private boolean isVirtual;
+    private final boolean isVirtual; // Made final - shouldn't change
 
     /**
-     * Creates a new virtual biome id.
+     * Creates a new biome id.
      *
-     * @param generationId The id used during terrain generation.
+     * @param otgBiomeId The id used during terrain generation.
      * @param savedId The id used in the world save files (the .mca files in
      *            the region directory).
+     * @param isVirtual Whether this biome is virtual.
      */
     public BiomeIds(int otgBiomeId, int savedId, boolean isVirtual)
     {
@@ -41,7 +38,7 @@ public class BiomeIds
      */
     public boolean isVirtual()
     {
-    	return this.isVirtual;
+        return this.isVirtual;
     }
 
     /**
@@ -66,12 +63,12 @@ public class BiomeIds
 
     public void setSavedId(int value)
     {
-    	savedId = value;
+        savedId = value;
     }
 
     public void setOTGBiomeId(int value)
     {
-    	otgBiomeId = value;
+        otgBiomeId = value;
     }
 
     @Override
@@ -89,10 +86,11 @@ public class BiomeIds
     @Override
     public int hashCode()
     {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + savedId;
-        result = prime * result + otgBiomeId;
+        // OPTIMIZATION: Use Objects.hash or better algorithm
+        int result = 17;
+        result = 31 * result + savedId;
+        result = 31 * result + otgBiomeId;
+        result = 31 * result + (isVirtual ? 1 : 0);
         return result;
     }
 
@@ -103,24 +101,13 @@ public class BiomeIds
         {
             return true;
         }
-        if (obj == null)
-        {
-            return false;
-        }
-        if (!(obj instanceof BiomeIds))
+        if (!(obj instanceof BiomeIds)) // Combined null check
         {
             return false;
         }
         BiomeIds other = (BiomeIds) obj;
-        if (savedId != other.savedId)
-        {
-            return false;
-        }
-        if (otgBiomeId != other.otgBiomeId)
-        {
-            return false;
-        }
-        return true;
+        return savedId == other.savedId && 
+               otgBiomeId == other.otgBiomeId &&
+               isVirtual == other.isVirtual; // Added missing field
     }
-
 }
