@@ -32,61 +32,102 @@ public abstract class EntityFunction<T extends CustomObjectConfigFile> extends C
         assureSize(5, args);
         // Those limits are arbitrary, LocalWorld.setBlock will limit it
         // correctly based on what chunks can be accessed
-		x = readInt(args.get(0), -100, 100);
+        x = readInt(args.get(0), -100, 100);
         y = readInt(args.get(1), -1000, 1000);
         z = readInt(args.get(2), -100, 100);
         processEntityName(args.get(3));
         groupSize = readInt(args.get(4), 0, Integer.MAX_VALUE);
 
-        if(args.size() > 5)
+        if (args.size() > 5)
         {
             processNameTagOrFileName(args.get(5));
         }
     }
 
-    public void processEntityName(String name) {
-        // When loading from file, it will contain either a mob name or a resource location.
-        // If a mob name, we get the mob's vanilla resource location
-        // If a resource location, we store it and extract a mob name from it
-        if (name == null)
+    /**
+     * Processes entity name, supporting both vanilla and modded entities.
+     * Accepts formats:
+     * - "Creeper" (vanilla alias)
+     * - "minecraft:creeper" (vanilla with namespace)
+     * - "modid:custom_mob" (modded entity)
+     */
+    public void processEntityName(String name)
+    {
+        if (name == null || name.trim().isEmpty())
+        {
             return;
-        if (name.contains(":")) {
-            resourceLocation = name.toLowerCase().trim();
-        } else {
-            resourceLocation = EntityNames.toInternalName(name);
-            if (!resourceLocation.contains(":")) {
-                OTG.log(LogMarker.ERROR, "Could not find entity '"+name+"', are you sure you spelled it correctly?");
+        }
+        
+        String trimmedName = name.trim();
+        
+        // Check if it contains a namespace
+        if (trimmedName.contains(":"))
+        {
+            // Already has namespace - use as-is (supports modded entities)
+            resourceLocation = trimmedName.toLowerCase();
+            
+            // Extract the path part as the simple name
+            String[] parts = resourceLocation.split(":", 2);
+            this.name = parts[1];
+            
+            // Only log warning for vanilla entities that aren't found
+            if (parts[0].equals("minecraft") && !EntityNames.isVanillaEntity(trimmedName))
+            {
+                OTG.log(LogMarker.WARN, "Unknown vanilla entity '" + trimmedName + "'. If this is a modded entity, make sure to include the mod namespace.");
             }
         }
-        this.name = resourceLocation.split(":")[1];
+        else
+        {
+            // No namespace - try to resolve as vanilla entity
+            resourceLocation = EntityNames.toInternalName(trimmedName);
+            
+            if (!resourceLocation.contains(":"))
+            {
+                // Couldn't resolve - log error
+                OTG.log(LogMarker.ERROR, "Could not find entity '" + trimmedName + "'. For vanilla entities, check spelling. For modded entities, use format 'modid:entityname'.");
+                // Default to minecraft namespace anyway
+                resourceLocation = "minecraft:" + trimmedName.toLowerCase();
+            }
+            
+            // Extract the simple name
+            this.name = resourceLocation.split(":")[1];
+        }
     }
 
-    public void processNameTagOrFileName(String s) {
+    public void processNameTagOrFileName(String s)
+    {
         originalNameTagOrNBTFileName = s;
 
-        if(originalNameTagOrNBTFileName != null && originalNameTagOrNBTFileName.toLowerCase().trim().endsWith(".txt"))
+        if (originalNameTagOrNBTFileName != null && originalNameTagOrNBTFileName.toLowerCase().trim().endsWith(".txt"))
         {
             nameTagOrNBTFileName = getHolder().getFile().getParentFile().getAbsolutePath() + File.separator + originalNameTagOrNBTFileName;
         }
-        else if(originalNameTagOrNBTFileName != null && originalNameTagOrNBTFileName.toLowerCase().trim().endsWith(".nbt"))
+        else if (originalNameTagOrNBTFileName != null && originalNameTagOrNBTFileName.toLowerCase().trim().endsWith(".nbt"))
         {
             nameTagOrNBTFileName = getHolder().getFile().getParentFile().getAbsolutePath() + File.separator + originalNameTagOrNBTFileName;
-            if (namedBinaryTag == null) {
+            if (namedBinaryTag == null)
+            {
                 // load NBT data from .nbt file
-                try {
+                try
+                {
                     FileInputStream stream = new FileInputStream(nameTagOrNBTFileName);
                     namedBinaryTag = NamedBinaryTag.readFrom(stream, true);
-                } catch (FileNotFoundException e) {
-                    if(OTG.getPluginConfig().spawnLog)
+                    stream.close();
+                }
+                catch (FileNotFoundException e)
+                {
+                    if (OTG.getPluginConfig().spawnLog)
                     {
-                        OTG.log(LogMarker.WARN, "Could not find file: "+nameTagOrNBTFileName);
+                        OTG.log(LogMarker.WARN, "Could not find file: " + nameTagOrNBTFileName);
                     }
                     // Set it to null so we don't go looking for this later
                     nameTagOrNBTFileName = null;
-                } catch (IOException e) {
+                }
+                catch (IOException e)
+                {
+                    OTG.log(LogMarker.ERROR, "Error reading NBT file: " + nameTagOrNBTFileName);
                     e.printStackTrace();
                 }
-
             }
         }
         else
@@ -99,54 +140,57 @@ public abstract class EntityFunction<T extends CustomObjectConfigFile> extends C
     @Override
     public String makeString()
     {
-        return "Entity(" + x + ',' + y + ',' + z + ',' + resourceLocation + ',' + groupSize + (originalNameTagOrNBTFileName != null && originalNameTagOrNBTFileName.length() > 0 ? ',' + originalNameTagOrNBTFileName : "") + ')';
+        return "Entity(" + x + ',' + y + ',' + z + ',' + resourceLocation + ',' + groupSize + 
+               (originalNameTagOrNBTFileName != null && originalNameTagOrNBTFileName.length() > 0 ? ',' + originalNameTagOrNBTFileName : "") + ')';
     }
 
     private String metaDataTag;
+    
     public String getMetaData()
     {
-    	if(nameTagOrNBTFileName != null && nameTagOrNBTFileName.length() > 0 && metaDataTag == null)
-    	{
-    		File metaDataFile = new File(nameTagOrNBTFileName);
-    		StringBuilder stringbuilder = new StringBuilder();
-    	    if(metaDataFile.exists())
-    	    {
-    			try {
-    				BufferedReader reader = new BufferedReader(new FileReader(metaDataFile));
-    				try {
-    					String line = reader.readLine();
-
-    				    while (line != null) {
-    				    	stringbuilder.append(line);
-    				        //sb.append(System.lineSeparator());
-    				        line = reader.readLine();
-    				    }
-    				} finally {
-    					reader.close();
-    				}
-    			} catch (FileNotFoundException e1) {
-    				e1.printStackTrace();
-    			}
-    			catch (IOException e1) {
-    				e1.printStackTrace();
-    			}
-    	    }
+        if (nameTagOrNBTFileName != null && nameTagOrNBTFileName.length() > 0 && metaDataTag == null)
+        {
+            File metaDataFile = new File(nameTagOrNBTFileName);
+            StringBuilder stringbuilder = new StringBuilder();
+            
+            if (metaDataFile.exists())
+            {
+                try (BufferedReader reader = new BufferedReader(new FileReader(metaDataFile)))
+                {
+                    String line = reader.readLine();
+                    while (line != null)
+                    {
+                        stringbuilder.append(line);
+                        line = reader.readLine();
+                    }
+                }
+                catch (IOException e)
+                {
+                    OTG.log(LogMarker.ERROR, "Error reading metadata file: " + nameTagOrNBTFileName);
+                    e.printStackTrace();
+                }
+            }
 
             metaDataTag = stringbuilder.toString();
-    	}
-    	return metaDataTag;
+        }
+        return metaDataTag;
     }
 
     @Override
     public boolean isAnalogousTo(CustomObjectConfigFunction<T> other)
     {
-        if(!getClass().equals(other.getClass()))
+        if (!getClass().equals(other.getClass()))
         {
             return false;
         }
         EntityFunction<T> block = (EntityFunction<T>) other;
-        return block.x == x && block.y == y && block.z == z && block.resourceLocation.equalsIgnoreCase(resourceLocation) && block.groupSize == groupSize && block.originalNameTagOrNBTFileName.equalsIgnoreCase(originalNameTagOrNBTFileName);
+        return block.x == x && 
+               block.y == y && 
+               block.z == z && 
+               block.resourceLocation.equalsIgnoreCase(resourceLocation) && 
+               block.groupSize == groupSize && 
+               block.originalNameTagOrNBTFileName.equalsIgnoreCase(originalNameTagOrNBTFileName);
     }
 
-	public abstract EntityFunction<T> createNewInstance();
+    public abstract EntityFunction<T> createNewInstance();
 }

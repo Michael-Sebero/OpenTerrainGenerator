@@ -10,6 +10,8 @@ import java.util.List;
 /**
  * This class holds data for a bukkit nms.BiomeMeta class. The name does not
  * match but ours make more sense.
+ * 
+ * Now supports modded entities with custom namespaces.
  */
 public class WeightedMobSpawnGroup
 {
@@ -31,9 +33,21 @@ public class WeightedMobSpawnGroup
         this(mobName.getInternalName(), weight, min, max);
     }
 
+    /**
+     * Gets the internal name with namespace (supports modded entities).
+     * 
+     * @return The resource location (e.g., "minecraft:creeper" or "modid:custom_mob")
+     */
     public String getInternalName()
     {
-        return EntityNames.toInternalName(this.getMob());
+        // If mob already has a namespace, use it directly (supports modded entities)
+        if (this.mob.contains(":"))
+        {
+            return this.mob;
+        }
+        
+        // Otherwise, resolve through EntityNames for vanilla entities
+        return EntityNames.toInternalName(this.mob);
     }
 
     public int getWeight()
@@ -54,6 +68,7 @@ public class WeightedMobSpawnGroup
     public static List<WeightedMobSpawnGroup> fromJson(String originalJson) throws InvalidConfigException
     {
         // Example: [{"mob": "Sheep", "weight": 12, "min": 4, "max": 4}]
+        // Example: [{"mob": "modid:custom_creature", "weight": 5, "min": 1, "max": 3}]
         List<WeightedMobSpawnGroup> mobGroups = new ArrayList<WeightedMobSpawnGroup>();
 
         String json = originalJson.trim();
@@ -65,9 +80,8 @@ public class WeightedMobSpawnGroup
         // Remove the [..]
         json = removeFirstAndLastChar(json);
 
-        // Every group is separated by a , but in the group the , is also
-        // used.
-        // So convert the ( to {, the ) to } and use an existing function to
+        // Every group is separated by a , but in the group the , is also used.
+        // So convert the { to (, the } to ) and use an existing function to
         // get each group
         json = json.replace('{', '(');
         json = json.replace('}', ')');
@@ -96,29 +110,36 @@ public class WeightedMobSpawnGroup
         {
             String[] optionParts = option.split(":");
             // Mob name can use resourcelocation: "Mob" : "minecraft:creeper" or path only: "Mob" : "creeper"
-            if (optionParts.length != 2 && optionParts.length != 3)  
+            // Now also supports modded: "Mob" : "modid:custom_mob"
+            if (optionParts.length < 2)
             {
                 throw new InvalidConfigException("Invalid JSON structure near " + option);
             }
+            
             String key = optionParts[0].trim();
-            String value = optionParts[1].trim();
+            
+            // Reconstruct value - handle resource locations with colons
+            StringBuilder valueBuilder = new StringBuilder(optionParts[1].trim());
+            for (int i = 2; i < optionParts.length; i++)
+            {
+                valueBuilder.append(':').append(optionParts[i].trim());
+            }
+            String value = valueBuilder.toString();
 
             if (key.equalsIgnoreCase("\"mob\""))
             {
-                // Mob name can use resourcelocation: "Mob" : "minecraft:creeper" or path only: "Mob" : "creeper"
-            	value = optionParts[1].trim() + (optionParts.length > 2 ? ":" + optionParts[2].trim() : "");
                 // Remove the quotes from the mob name
                 mobName = removeFirstAndLastChar(value);
             }
-            if (key.equalsIgnoreCase("\"weight\""))
+            else if (key.equalsIgnoreCase("\"weight\""))
             {
                 weight = StringHelper.readInt(value, 0, 1000);
             }
-            if (key.equalsIgnoreCase("\"min\""))
+            else if (key.equalsIgnoreCase("\"min\""))
             {
                 min = StringHelper.readInt(value, 0, 1000);
             }
-            if (key.equalsIgnoreCase("\"max\""))
+            else if (key.equalsIgnoreCase("\"max\""))
             {
                 max = StringHelper.readInt(value, 0, 1000);
             }
@@ -127,11 +148,11 @@ public class WeightedMobSpawnGroup
         // Check if data is complete and valid
         if (mobName == null || min == -1 || max == -1 || weight == -1)
         {
-            throw new InvalidConfigException("Excepted mob, weight, min and max, but one or more were missing in mob group " + json);
+            throw new InvalidConfigException("Expected mob, weight, min and max, but one or more were missing in mob group " + json);
         }
         if (min > max)
         {
-            throw new InvalidConfigException("Minimum group size may not be larger that maximum group size for mob group " + json);
+            throw new InvalidConfigException("Minimum group size may not be larger than maximum group size for mob group " + json);
         }
 
         return new WeightedMobSpawnGroup(mobName, weight, min, max);
@@ -144,18 +165,19 @@ public class WeightedMobSpawnGroup
      */
     public static String toJson(List<WeightedMobSpawnGroup> list)
     {
+        if (list.isEmpty())
+        {
+            return "[]";
+        }
+        
         StringBuilder json = new StringBuilder("[");
         for (WeightedMobSpawnGroup group : list)
         {
             group.toJson(json);
             json.append(", ");
         }
-        // Remove ", " at end
-        if (json.length() != 1)
-        {
-            json.deleteCharAt(json.length() - 1);
-            json.deleteCharAt(json.length() - 1);
-        }
+        // Remove trailing ", "
+        json.setLength(json.length() - 2);
         // Add closing bracket
         json.append(']');
         return json.toString();
@@ -205,24 +227,15 @@ public class WeightedMobSpawnGroup
         {
             return true;
         }
-        if (obj == null)
-        {
-            return false;
-        }
         if (!(obj instanceof WeightedMobSpawnGroup))
         {
             return false;
         }
         WeightedMobSpawnGroup other = (WeightedMobSpawnGroup) obj;
-        if (max != other.max || min != other.min || weight != other.weight)
-        {
-            return false;
-        }
-        if (!getMob().equals(other.getMob()))
-        {
-            return false;
-        }
-        return true;
+        return max == other.max && 
+               min == other.min && 
+               weight == other.weight &&
+               getMob().equals(other.getMob());
     }
 
     private static String removeFirstAndLastChar(String string)
@@ -230,7 +243,8 @@ public class WeightedMobSpawnGroup
         return string.substring(1, string.length() - 1);
     }
 
-	public String getMob() {
-		return mob;
-	}
+    public String getMob()
+    {
+        return mob;
+    }
 }

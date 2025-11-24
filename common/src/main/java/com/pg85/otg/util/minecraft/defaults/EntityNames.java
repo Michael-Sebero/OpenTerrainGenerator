@@ -5,17 +5,19 @@ import java.util.Map;
 
 /**
  * Contains a lot of alternative mob names. The implementation should support
- * this names, along with the other names that are available on the current
+ * these names, along with the other names that are available on the current
  * platform.
+ * 
+ * Now supports modded entities with custom namespaces (e.g., "modid:creature").
  */
 public enum EntityNames
 {
-	//See: net.minecraft.entity.EntityList for internal mob names list
+    // See: net.minecraft.entity.EntityList for internal mob names list
 
     // Aliases don't need to contain underscores - the toInternalName()
     // function removes those when looking up anyway
-	
-	// Mobs
+    
+    // Mobs
 
     BAT("bat", "bat"),
     BLAZE("blaze", "blaze"),
@@ -35,11 +37,11 @@ public enum EntityNames
     HORSE("horse", "horse"),
     HUSK("husk", "husk"),
     LLAMA("llama", "llama"),
-	MAGMA_CUBE("magma_cube", "magmaslime", "lavaslime", "magmacube"),
+    MAGMA_CUBE("magma_cube", "magmaslime", "lavaslime", "magmacube"),
     MULE("mule", "mule"),
     MOOSHROOM("mooshroom", "mushroomcow", "mooshroom"),
     OCELOT("ocelot", "ozelot", "ocelot"),
-	ILLUSION_ILLAGER("illusion_illager", "illusionillager", "illusioner"),
+    ILLUSION_ILLAGER("illusion_illager", "illusionillager", "illusioner"),
     PARROT("parrot", "parrot"),
     PIG("pig", "pig"),
     POLAR_BEAR("polar_bear", "polarbear"),
@@ -53,7 +55,7 @@ public enum EntityNames
     SNOWMAN("snowman", "snowman"),
     SPIDER("spider", "spider"),
     SQUID("squid", "squid"),
-	STRAY("stray", "stray"),
+    STRAY("stray", "stray"),
     VEX("vex", "vex"),    
     VILLAGER("villager", "villager"),
     VILLAGER_GOLEM("villager_golem", "villagergolem", "irongolem"),
@@ -67,9 +69,9 @@ public enum EntityNames
     ZOMBIE_PIGMAN("zombie_pigman", "zombiepigman", "pigzombie"),
     ZOMBIE_VILLAGER("zombie_villager", "zombievillager", "villagerzombie"),
 
-	// Projectiles
-	
-	ARROW("arrow", "arrow"),
+    // Projectiles
+    
+    ARROW("arrow", "arrow"),
     DRAGON_FIREBALL("dragon_fireball", "dragonfireball"),
     EGG("egg", "egg", "thrownegg"),
     ENDER_PEARL("ender_pearl", "enderpearl", "thrownenderpearl"),
@@ -84,9 +86,9 @@ public enum EntityNames
     XP_BOTTLE("xp_bottle","xpbottle", "thrownexpbottle"),
     XP_ORB("xp_orb", "xp_orb", "experienceorb"),
 
-	// Entities
-	
-	AREA_EFFECT_CLOUD("area_effect_cloud", "areaeffectcloud"),
+    // Entities
+    
+    AREA_EFFECT_CLOUD("area_effect_cloud", "areaeffectcloud"),
     ARMOR_STAND("armor_stand", "armorstand"),
     BOAT("boat", "boat"),
     CHEST_MINECART("chest_minecart", "chestminecart", "minecartchest"),
@@ -108,7 +110,7 @@ public enum EntityNames
     WITHER_SKULL("wither_skull", "witherskull");
    
     // Contains all aliases (alias, internalName)
-    private static Map<String, String> MobAliases = new HashMap<String, String>();
+    private static final Map<String, String> MOB_ALIASES = new HashMap<String, String>();
 
     // Auto-register all aliases in the enum
     static
@@ -121,26 +123,103 @@ public enum EntityNames
 
     /**
      * Returns the internal name of the mob. If it can't be found, it returns
-     * the alias.
+     * the alias. Now supports modded entities with custom namespaces.
      *
-     * @param alias The alias.
-     * @return The internal name, or if it can't be found, the alias.
+     * @param alias The alias (e.g., "creeper", "minecraft:creeper", "modid:creature")
+     * @return The internal name with namespace, or the original alias if not found
      */
     public static String toInternalName(String alias)
     {
-    	for(String key : MobAliases.keySet())
-    	{
-    		if(
-				key.toLowerCase().trim().replace("minecraft:","").replace("entity","").trim().replace("_","").equalsIgnoreCase(
-					alias.toLowerCase().trim().replace("minecraft:","").replace("entity","").trim().replace("_","")
-				)
-			)
-    		{
-    			return MobAliases.get(key);
-    		}
-    	}
-    	
-        return alias;
+        if (alias == null || alias.trim().isEmpty())
+        {
+            return alias;
+        }
+        
+        String trimmedAlias = alias.trim().toLowerCase();
+        
+        // If it already contains a namespace and it's NOT minecraft, assume it's a modded entity
+        if (trimmedAlias.contains(":"))
+        {
+            String[] parts = trimmedAlias.split(":", 2);
+            String namespace = parts[0];
+            
+            // For non-minecraft namespaces, return as-is (modded entity)
+            if (!"minecraft".equals(namespace))
+            {
+                return trimmedAlias;
+            }
+            
+            // For minecraft namespace, try to find in aliases
+            String entityPath = parts[1];
+            String normalized = normalizeEntityName(entityPath);
+            
+            // Check if this exact minecraft: entity exists in our aliases
+            for (Map.Entry<String, String> entry : MOB_ALIASES.entrySet())
+            {
+                if (normalizeEntityName(entry.getKey()).equals("minecraft:" + normalized))
+                {
+                    return entry.getValue();
+                }
+            }
+            
+            // Not found in aliases, return as-is
+            return trimmedAlias;
+        }
+        
+        // No namespace provided - try to find in vanilla aliases
+        String normalized = normalizeEntityName(trimmedAlias);
+        
+        for (Map.Entry<String, String> entry : MOB_ALIASES.entrySet())
+        {
+            if (normalizeEntityName(entry.getKey()).equals("minecraft:" + normalized))
+            {
+                return entry.getValue();
+            }
+        }
+        
+        // Not found in aliases - assume vanilla entity and add minecraft namespace
+        return "minecraft:" + trimmedAlias;
+    }
+    
+    /**
+     * Normalizes an entity name by removing common variations.
+     * This helps match different naming conventions.
+     * 
+     * @param name The entity name to normalize
+     * @return The normalized name
+     */
+    private static String normalizeEntityName(String name)
+    {
+        return name.toLowerCase()
+                   .replace("_", "")
+                   .replace("entity", "")
+                   .trim();
+    }
+    
+    /**
+     * Checks if a given entity name is a valid vanilla Minecraft entity.
+     * 
+     * @param entityName The entity name to check (with or without namespace)
+     * @return True if the entity is a known vanilla entity, false otherwise
+     */
+    public static boolean isVanillaEntity(String entityName)
+    {
+        if (entityName == null || entityName.trim().isEmpty())
+        {
+            return false;
+        }
+        
+        String normalized = normalizeEntityName(entityName.replace("minecraft:", ""));
+        
+        for (String key : MOB_ALIASES.keySet())
+        {
+            if (normalizeEntityName(key).equals("minecraft:" + normalized))
+            {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**
@@ -153,14 +232,14 @@ public enum EntityNames
     {
         for (String alias : aliases)
         {
-            MobAliases.put("minecraft:" + alias, "minecraft:" + internalMinecraftName);
+            MOB_ALIASES.put("minecraft:" + alias, "minecraft:" + internalMinecraftName);
         }
     }
 
-    private String[] aliases;
-    private String internalMinecraftName;
+    private final String[] aliases;
+    private final String internalMinecraftName;
 
-    private EntityNames(String internalMinecraftName, String... aliases)
+    EntityNames(String internalMinecraftName, String... aliases)
     {
         this.internalMinecraftName = internalMinecraftName;
         this.aliases = aliases;
