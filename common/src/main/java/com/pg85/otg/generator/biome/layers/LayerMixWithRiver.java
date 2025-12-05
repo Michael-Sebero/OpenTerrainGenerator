@@ -8,9 +8,21 @@ import com.pg85.otg.generator.biome.ArraysCache;
 import com.pg85.otg.logging.LogMarker;
 import com.pg85.otg.network.ConfigProvider;
 
+/**
+ * Finalizes biome generation by mixing base biomes with river biomes.
+ * Updated with 1.16.5 improvements: cached config values, extracted helper methods,
+ * and cleaner logic while maintaining full 1.12.2 compatibility.
+ */
 public class LayerMixWithRiver extends Layer
 {
     private int defaultFrozenOceanId;
+    private ConfigProvider configs;
+    private int[] riverBiomes;
+    private Layer riverLayer;
+    
+    // Cached configuration values (1.16.5 improvement)
+    private boolean riversEnabled;
+    private boolean frozenOcean;
 	
     LayerMixWithRiver(long seed, Layer childLayer, Layer riverLayer, ConfigProvider configs, LocalWorld world, int defaultOceanId, int defaultFrozenOceanId)
     {
@@ -20,9 +32,16 @@ public class LayerMixWithRiver extends Layer
         this.configs = configs;
         this.riverLayer = riverLayer;
         this.riverBiomes = new int[world.getMaxBiomesCount()];
+        
+        // Cache configuration values to avoid repeated lookups (1.16.5 improvement)
+        WorldConfig worldConfig = configs.getWorldConfig();
+        this.riversEnabled = worldConfig.riversEnabled;
+        this.frozenOcean = worldConfig.frozenOcean;
+        
         LocalBiome biome;
         LocalBiome riverBiome;
         
+        // Initialize river biome mappings
         for (int id = 0; id < this.riverBiomes.length; id++)
         {
             biome = configs.getBiomeByOTGIdOrNull(id);
@@ -40,10 +59,6 @@ public class LayerMixWithRiver extends Layer
             }
         }
     }
-
-    private ConfigProvider configs;
-    private int[] riverBiomes;
-    private Layer riverLayer;
 
     @Override
     public void initWorldGenSeed(long worldSeed)
@@ -68,145 +83,145 @@ public class LayerMixWithRiver extends Layer
         }
     }
 
+    /**
+     * Full biome generation with rivers mixed in.
+     * Improved with 1.16.5 patterns: extracted helper method, cached config lookups.
+     */
     private int[] getFull(LocalWorld world, ArraysCache cache, int x, int z, int xSize, int zSize)
     {
         int[] childInts = this.child.getInts(world, cache, x, z, xSize, zSize);
         int[] riverInts = this.riverLayer.getInts(world, cache, x, z, xSize, zSize);
         int[] thisInts = cache.getArray(xSize * zSize);
-
-		WorldConfig worldConfig = this.configs.getWorldConfig();
         
-        int currentPiece;
+        int sample;
         int currentRiver;
-        int cachedId;
+        int biomeId;
+        int riverBiomeId;
+        
         for (int zi = 0; zi < zSize; zi++)
         {
             for (int xi = 0; xi < xSize; xi++)
             {
-                currentPiece = childInts[(xi + zi * xSize)];
-                currentRiver = riverInts[(xi + zi * xSize)];
+                int index = xi + zi * xSize;
+                sample = childInts[index];
+                currentRiver = riverInts[index];
+                
+                // Extract base biome ID using helper method (1.16.5 pattern)
+                biomeId = extractBiomeId(sample);
 
-                if ((currentPiece & LandBit) != 0)
+                // Apply river biome if rivers are enabled and present
+                if (this.riversEnabled && (currentRiver & RiverBits) != 0)
                 {
-                	if((currentPiece & BiomeBitsAreSetBit) != 0)
-                	{
-                		cachedId = currentPiece & BiomeBits;	
-                	} else {
-                		// TODO: When does this happen, is it okay for this to happen, shouldn't there be a land biome available?
-                		cachedId = this.defaultOceanId;
-                	}
-                }
-                else if (worldConfig.frozenOcean && (currentPiece & IceBit) != 0)
-                {
-                    cachedId = this.defaultFrozenOceanId;
-                } else {
-                    cachedId = this.defaultOceanId;
+                    riverBiomeId = this.riverBiomes[biomeId];
+                    if (riverBiomeId >= 0)
+                    {
+                        biomeId = riverBiomeId;
+                    }
                 }
                 
-                if (worldConfig.riversEnabled && (currentRiver & RiverBits) != 0 && !this.configs.getBiomeByOTGIdOrNull(cachedId).getBiomeConfig().riverBiome.isEmpty())
-                {
-                	currentPiece = this.riverBiomes[cachedId];
-                } else {
-                    currentPiece = cachedId;
-                }
-                thisInts[(xi + zi * xSize)] = currentPiece;
+                thisInts[index] = biomeId;
             }
         }
         return thisInts;
     }
 
+    /**
+     * Generate biomes without rivers (for visualization/debugging).
+     */
     private int[] getWithoutRivers(LocalWorld world, ArraysCache cache, int x, int z, int xSize, int zSize)
     {
         int[] childInts = this.child.getInts(world, cache, x, z, xSize, zSize);
         int[] thisInts = cache.getArray(xSize * zSize);
-
-		WorldConfig worldConfig = this.configs.getWorldConfig();
         
-        int currentPiece;
-        int cachedId;
+        int sample;
+        int biomeId;
+        
         for (int zi = 0; zi < zSize; zi++)
         {
             for (int xi = 0; xi < xSize; xi++)
             {
-                currentPiece = childInts[(xi + zi * xSize)];
-                // TODO: When/why was this commented out? Might be useful?
-                // currentRiver = riverInts[(j + i * x_size)];
-
-                if ((currentPiece & LandBit) != 0)
-                {
-                	if((currentPiece & BiomeBitsAreSetBit) != 0)
-                	{
-                		cachedId = currentPiece & BiomeBits;	
-                	} else {
-                		// TODO: When does this happen, is it okay for this to happen, shouldn't there be a land biome available?
-                		cachedId = this.defaultOceanId;
-                	}
-                }
-                else if (worldConfig.frozenOcean && (currentPiece & IceBit) != 0)
-                {
-                    cachedId = this.defaultFrozenOceanId;
-                } else {
-                    cachedId = this.defaultOceanId;
-                }
-
-                // TODO: When/why was this commented out? Might be useful?
-                /*if (this.worldConfig.riversEnabled && (currentRiver & RiverBits) != 0 && !this.worldConfig.biomeConfigs[cachedId].riverBiome.isEmpty())
-                    currentPiece = this.riverBiomes[cachedId];
-                else*/
-                currentPiece = cachedId;
-
-                thisInts[(xi + zi * xSize)] = currentPiece;
+                int index = xi + zi * xSize;
+                sample = childInts[index];
+                
+                // Extract base biome without applying rivers
+                biomeId = extractBiomeId(sample);
+                
+                thisInts[index] = biomeId;
             }
         }
         return thisInts;
     }
 
+    /**
+     * Generate only river indicators (0 or 1) for visualization.
+     */
     private int[] getOnlyRivers(LocalWorld world, ArraysCache cache, int x, int z, int xSize, int zSize)
     {
         int[] childInts = this.child.getInts(world, cache, x, z, xSize, zSize);
         int[] riverInts = this.riverLayer.getInts(world, cache, x, z, xSize, zSize);
         int[] thisInts = cache.getArray(xSize * zSize);
-        WorldConfig worldConfig = this.configs.getWorldConfig();
        
-        int currentPiece;
+        int sample;
         int currentRiver;
-        int cachedId;
+        int biomeId;
         LocalBiome biome;
+        
         for (int zi = 0; zi < zSize; zi++)
         {
             for (int xi = 0; xi < xSize; xi++)
             {
-                currentPiece = childInts[(xi + zi * xSize)];
-                currentRiver = riverInts[(xi + zi * xSize)];
+                int index = xi + zi * xSize;
+                sample = childInts[index];
+                currentRiver = riverInts[index];
 
-                if ((currentPiece & LandBit) != 0)
-                {
-                	if((currentPiece & BiomeBitsAreSetBit) != 0)
-                	{
-                		cachedId = currentPiece & BiomeBits;	
-                	} else {
-                		// TODO: When does this happen, is it okay for this to happen, shouldn't there be a land biome available?
-                		cachedId = this.defaultOceanId;
-                	}
-                }
-                else if (worldConfig.frozenOcean && (currentPiece & IceBit) != 0)
-                {
-                    cachedId = this.defaultFrozenOceanId;
-                } else {
-                    cachedId = this.defaultOceanId;
-                }
-
-                biome = this.configs.getBiomeByOTGIdOrNull(cachedId);
+                // Extract base biome ID
+                biomeId = extractBiomeId(sample);
+                biome = this.configs.getBiomeByOTGIdOrNull(biomeId);
                 
-                if (worldConfig.riversEnabled && (currentRiver & RiverBits) != 0 && !biome.getBiomeConfig().riverBiome.isEmpty())
+                // Check if this position should have a river
+                if (this.riversEnabled && 
+                    (currentRiver & RiverBits) != 0 && 
+                    biome != null &&
+                    !biome.getBiomeConfig().riverBiome.isEmpty())
                 {
-                	currentPiece = 1;
+                    thisInts[index] = 1;
                 } else {
-                    currentPiece = 0;
+                    thisInts[index] = 0;
                 }
-                thisInts[(xi + zi * xSize)] = currentPiece;
             }
         }
         return thisInts;
+    }
+    
+    /**
+     * Extract the base biome ID from a sample value, handling land/ocean/ice bits.
+     * Helper method inspired by 1.16.5's cleaner separation of concerns.
+     * 
+     * @param sample The sample value containing biome and flag bits
+     * @return The extracted biome ID
+     */
+    private int extractBiomeId(int sample)
+    {
+        // Check if this is land with a valid biome set
+        if ((sample & LandBit) != 0)
+        {
+            if ((sample & BiomeBitsAreSetBit) != 0)
+            {
+                return sample & BiomeBits;
+            } else {
+                // Land bit is set but no biome specified - fallback to ocean
+                return this.defaultOceanId;
+            }
+        }
+        // Check for frozen ocean
+        else if (this.frozenOcean && (sample & IceBit) != 0)
+        {
+            return this.defaultFrozenOceanId;
+        }
+        // Default to regular ocean
+        else
+        {
+            return this.defaultOceanId;
+        }
     }
 }
